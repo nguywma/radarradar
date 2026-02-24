@@ -62,7 +62,7 @@ class NetVLAD(nn.Module):
 
 
 class REM(nn.Module):
-    def __init__(self, from_scratch=False, rotations=32):
+    def __init__(self, from_scratch=False, rotations=8):
         super(REM, self).__init__()
         
         # cnn backbone
