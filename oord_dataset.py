@@ -436,20 +436,39 @@ class TrainingDataset(data.Dataset):
         query = (query.astype(np.float32))/256
         positive = (positive.astype(np.float32)/256)
 
-        negatives = []
+        # negatives = []
 
-        for neg_i in neg_idx:
+        # for neg_i in neg_idx:
         
-            negative = cv2.imread(self.imgs_path[neg_i])
-            mat = cv2.getRotationMatrix2D((negative.shape[1]//2, negative.shape[0]//2 ), np.random.randint(0,360), 1)
-            negative = cv2.warpAffine(negative, mat, negative.shape[:2]) 
-            negative = negative.transpose(2,0,1)
-            negative = (negative)/256
+        #     negative = cv2.imread(self.imgs_path[neg_i])
+        #     mat = cv2.getRotationMatrix2D((negative.shape[1]//2, negative.shape[0]//2 ), np.random.randint(0,360), 1)
+        #     negative = cv2.warpAffine(negative, mat, negative.shape[:2]) 
+        #     negative = negative.transpose(2,0,1)
+        #     negative = (negative)/256
             
-            negatives.append(torch.from_numpy(negative.astype(np.float32)))
+        #     negatives.append(torch.from_numpy(negative.astype(np.float32)))
 
-        negatives = torch.stack(negatives, 0)
+        # negatives = torch.stack(negatives, 0)
+        negatives = []
+        target_neg_count = 32
 
+        # Loop until we reach 32 augmented samples
+        while len(negatives) < target_neg_count:
+            for neg_i in neg_idx: # neg_idx contains your 10 hard-mined indices
+                if len(negatives) >= target_neg_count:
+                    break
+                    
+                negative_img = cv2.imread(self.imgs_path[neg_i])
+                # Use the "off-grid" rotation logic to challenge the C8 equivariance
+                angle = np.random.uniform(0, 360)
+                # Avoid multiples of 45 degrees
+                if all(abs(angle - c8) > 5 for c8 in range(0, 361, 45)):
+                    mat = cv2.getRotationMatrix2D((negative_img.shape[1]//2, negative_img.shape[0]//2), angle, 1)
+                    negative_img = cv2.warpAffine(negative_img, mat, negative_img.shape[:2]) 
+                    negative_img = negative_img.transpose(2,0,1) / 256.0
+                    negatives.append(torch.from_numpy(negative_img.astype(np.float32)))
+
+        negatives = torch.stack(negatives, 0) # Shape: [32, 3, H, W]
         return query, positive, negatives, index
 
     def __len__(self):
