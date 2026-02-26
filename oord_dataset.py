@@ -60,11 +60,11 @@ class InferDataset(data.Dataset):
             mapped_seq = '2021-11-29-12-19-16'
         else:
             mapped_seq = seq  # fallback, if none matched
-        self.poses = pd.read_csv('../../oord_data/' + 'pose/' + mapped_seq + '/gps.csv')
-        self.imu = pd.read_csv('../../oord_data/'+'pose/'+mapped_seq+'/imu.csv')
+        self.poses = pd.read_csv(dataset_path + 'pose/' + mapped_seq + '/gps.csv')
+        self.imu = pd.read_csv(dataset_path + 'pose/' + mapped_seq + '/imu.csv')
         self.timestamps = [int(os.path.splitext(os.path.basename(path))[0]) for path in self.imgs_path] 
-        self.cen2018path = '../../oord_data/cen2018/' + seq + '_resize/'
-        self.posespath = '../../oord_data/'+'pose/'+mapped_seq+'/gps.csv'
+        self.cen2018path = dataset_path + 'cen2018/' + seq + '_resize/'
+        self.posespath = dataset_path + 'pose/' + mapped_seq + '/gps.csv'
         self.cen2018 = [self.cen2018path + imgs_p[i] for i in range (0,len(imgs_p), sample_inteval)]
         # print(self.cen2018)
     def __getitem__(self, index):
