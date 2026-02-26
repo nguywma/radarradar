@@ -38,10 +38,10 @@ def get_args():
     parser.add_argument('--cacheBatchSize', type=int, default=8, help='Batch size for caching and testing')
     parser.add_argument('--nEpochs', type=int, default=60, help='number of epochs to train for')
     parser.add_argument('--nGPU', type=int, default=2, help='number of GPU to use.')
-    parser.add_argument('--lr', type=float, default=0.00001, help='Learning Rate.')
+    parser.add_argument('--lr', type=float, default=1e-4, help='Learning Rate.')
     parser.add_argument('--lrStep', type=float, default=10, help='Decay LR ever N steps.')
     parser.add_argument('--lrGamma', type=float, default=0.5, help='Multiply LR by Gamma for decaying.')
-    parser.add_argument('--weightDecay', type=float, default=0.005, help='Weight decay for SGD.')
+    parser.add_argument('--weightDecay', type=float, default=1e-3, help='Weight decay for SGD.')
     parser.add_argument('--momentum', type=float, default=0.9, help='Momentum for SGD.')
     parser.add_argument('--loss', type=str, default='infonce', choices=['triplet','infonce'])
     parser.add_argument('--threads', type=int, default=16, help='Number of threads for each data loader to use')
@@ -212,7 +212,7 @@ def train_epoch(epoch, model, train_set):
     writer.add_scalar('Train/AvgLoss', avg_loss, epoch)
 
 
-def train_epoch_infonce(epoch, model, train_set):
+def train_epoch_infonce(epoch, model, train_set, optimizer, scheduler):
     epoch_loss = 0
     n_batches = (len(train_set) + opt.batchSize - 1) // opt.batchSize
     
@@ -256,43 +256,40 @@ def train_epoch_infonce(epoch, model, train_set):
     model.train()
     # ... rest of the training loop remains the same ...
 
+    model.train()
     for iteration, (query, positives, negatives, indices) in enumerate(training_data_loader, 1):
-
         B, C, H, W = query.shape
-        input = torch.cat([query, positives, negatives])
-
-        input = input.to(device)
+        input = torch.cat([query, positives, negatives]).to(device)
         
         _, _, global_descs = model(input)
-
         global_descs_Q, global_descs_P, global_descs_N = torch.split(global_descs, [B, B, negatives.shape[0]])
-
 
         optimizer.zero_grad()
 
-        # no need to train the kps feature
-        loss = 0
-        num_negs = negatives.shape[0]//B
+        num_negs = negatives.shape[0] // B
         global_descs_N = global_descs_N.view(B, num_negs, -1)
+        
         loss = criterion(global_descs_Q, global_descs_P, global_descs_N)
         loss.backward()
         optimizer.step()
 
         batch_loss = loss.item()
         epoch_loss += batch_loss
-        if iteration % 50 == 0 or n_batches <= 10:
-            print("==> Epoch[{}]({}/{}): Loss: {:.4f}".format(epoch, iteration, 
-                n_batches, batch_loss), flush = True)
-            writer.add_scalar('Train/Loss', batch_loss, 
-                    ((epoch-1) * n_batches) + iteration)
+        
+        if iteration % 50 == 0:
+            # Print current LR to monitor warmup/decay
+            current_lr = optimizer.param_groups[0]['lr']
+            print(f"==> Epoch[{epoch}]({iteration}/{n_batches}): Loss: {batch_loss:.4f} | LR: {current_lr:.8f}")
             
 
-    optimizer.zero_grad()    
+    # optimizer.zero_grad()   
+    scheduler.step()
     avg_loss = epoch_loss / n_batches
 
     print("===> Epoch {} Complete: Avg. Loss: {:.4f}".format(epoch, avg_loss), 
             flush=True)
     writer.add_scalar('Train/AvgLoss', avg_loss, epoch)
+    writer.add_scalar('Train/LearningRate', optimizer.param_groups[0]['lr'], epoch)
 # def infer(eval_set, return_local_feats = False):
 #     test_data_loader = DataLoader(dataset=eval_set, 
 #                 num_workers=opt.threads, batch_size=opt.cacheBatchSize, shuffle=False)
@@ -504,8 +501,15 @@ if __name__ == "__main__":
         train_set = ConcatDataset(train_subsets)
         # initilize model weights
         optimizer = optim.Adam(filter(lambda p: p.requires_grad, 
-            model.parameters()), lr=opt.lr)    
-        
+            model.parameters()), lr=opt.lr, weight_decay=opt.weightDecay)    
+        def lr_lambda(current_epoch):
+            # 5 Epoch Linear Warmup
+            if current_epoch < 5:
+                return float(current_epoch + 1) / 5
+            # Step Decay: Multiply by lrGamma every lrStep
+            return opt.lrGamma ** (current_epoch // opt.lrStep)
+
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
         best_score = 0
 
         # for epoch in range(opt.nEpochs):
@@ -565,7 +569,7 @@ if __name__ == "__main__":
             if opt.loss == 'triplet':
                 avg_loss = train_epoch(epoch, model, train_set)
             if opt.loss == 'infonce':
-                avg_loss = train_epoch_infonce(epoch,model,train_set)
+                avg_loss = train_epoch_infonce(epoch,model,train_set,optimizer,scheduler)
             print('===> Testing / Validation')
             model.eval()
             
